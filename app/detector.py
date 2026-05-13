@@ -16,6 +16,16 @@ import numpy as np
 
 try:
     import mediapipe as mp
+    # 显式导入 solutions 子模块:
+    # 1) 强制 mediapipe 初始化 solutions namespace (PyInstaller 打包后常见问题:
+    #    "module 'mediapipe' has no attribute 'solutions'");
+    # 2) 让 PyInstaller 的静态分析能够发现这些子包, 确保被正确收集。
+    import mediapipe.python.solutions.pose as _mp_pose  # noqa: F401
+    import mediapipe.python.solutions.face_detection as _mp_face  # noqa: F401
+    # 有些环境下 mp.solutions 需要手动绑定 (再保险一层)
+    if not hasattr(mp, "solutions"):
+        from mediapipe.python import solutions as _solutions
+        mp.solutions = _solutions  # type: ignore[attr-defined]
 except ImportError:  # pragma: no cover
     mp = None
 
