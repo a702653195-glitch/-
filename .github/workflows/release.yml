@@ -45,6 +45,12 @@ jobs:
         shell: bash
         run: python tests/test_cropper_logic.py
 
+      - name: Sanity check - verify mediapipe.solutions is importable
+        shell: bash
+        run: |
+          python -c "import mediapipe.python.solutions.pose; import mediapipe.python.solutions.face_detection; import mediapipe; assert hasattr(mediapipe, 'solutions'), 'solutions missing'; print('mediapipe.solutions OK')"
+          python -c "from app.detector import PersonDetector; print('detector import OK')"
+
       - name: Locate MediaPipe resources
         id: mediapipe
         shell: bash
@@ -78,11 +84,60 @@ jobs:
             --onefile ^
             --noconsole ^
             --clean ^
+            --noconfirm ^
             --add-data "%MP_DIR%\modules;mediapipe\modules" ^
-            --hidden-import mediapipe ^
-            --hidden-import cv2 ^
+            --add-data "%MP_DIR%\python\solutions;mediapipe\python\solutions" ^
             --collect-all mediapipe ^
+            --collect-submodules mediapipe ^
+            --collect-data mediapipe ^
+            --collect-binaries mediapipe ^
+            --copy-metadata mediapipe ^
+            --hidden-import mediapipe ^
+            --hidden-import mediapipe.python ^
+            --hidden-import mediapipe.python.solutions ^
+            --hidden-import mediapipe.python.solutions.pose ^
+            --hidden-import mediapipe.python.solutions.face_detection ^
+            --hidden-import mediapipe.python.solutions.drawing_utils ^
+            --hidden-import cv2 ^
             main.py
+
+      - name: Build smoke-test exe (console) to validate frozen mediapipe
+        shell: cmd
+        env:
+          MP_DIR: ${{ steps.mediapipe.outputs.dir }}
+        run: |
+          pyinstaller ^
+            --name CropToolSmoke ^
+            --onefile ^
+            --console ^
+            --clean ^
+            --noconfirm ^
+            --distpath dist_smoke ^
+            --workpath build_smoke ^
+            --specpath build_smoke ^
+            --add-data "%MP_DIR%\modules;mediapipe\modules" ^
+            --add-data "%MP_DIR%\python\solutions;mediapipe\python\solutions" ^
+            --collect-all mediapipe ^
+            --collect-submodules mediapipe ^
+            --collect-data mediapipe ^
+            --collect-binaries mediapipe ^
+            --copy-metadata mediapipe ^
+            --hidden-import mediapipe ^
+            --hidden-import mediapipe.python ^
+            --hidden-import mediapipe.python.solutions ^
+            --hidden-import mediapipe.python.solutions.pose ^
+            --hidden-import mediapipe.python.solutions.face_detection ^
+            --hidden-import cv2 ^
+            smoke_test.py
+
+      - name: Run smoke-test exe - MUST print SMOKE_OK
+        shell: cmd
+        run: |
+          dist_smoke\CropToolSmoke.exe
+          if errorlevel 1 (
+            echo [FATAL] Smoke test failed - the built exe cannot access mediapipe.solutions
+            exit /b 1
+          )
 
       - name: Verify artifact exists
         shell: bash
