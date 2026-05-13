@@ -1,0 +1,8 @@
+# 核心图像处理与计算机视觉
+opencv-python>=4.8.0,<4.11.0
+mediapipe>=0.10.9,<0.11.0
+numpy>=1.24.0,<2.0.0
+Pillow>=10.0.0
+
+# 打包 Windows 可执行文件 (可选,仅打包时需要)
+# pyinstaller>=6.3.0

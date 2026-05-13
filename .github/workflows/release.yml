@@ -1,0 +1,139 @@
+name: Build & Release Windows EXE
+
+on:
+  push:
+    # 推 tag (v*) 会触发构建 + Release；推分支只构建验证
+    branches:
+      - main
+      - 'feat/**'
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '发布版本号 (例如 v1.0.0)。填写则会创建 Release; 留空仅构建。'
+        required: false
+        default: ''
+
+permissions:
+  contents: write   # 创建 Release 需要
+
+jobs:
+  build:
+    name: Build on Windows
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Run geometry unit tests
+        shell: bash
+        run: python tests/test_cropper_logic.py
+
+      - name: Locate MediaPipe resources
+        id: mediapipe
+        shell: bash
+        run: |
+          MP_DIR=$(python -c "import os, mediapipe; print(os.path.dirname(mediapipe.__file__))")
+          echo "dir=$MP_DIR" >> "$GITHUB_OUTPUT"
+          echo "MediaPipe dir: $MP_DIR"
+
+      - name: Determine version string
+        id: ver
+        shell: bash
+        run: |
+          # 优先使用 tag，其次 workflow_dispatch input，最后用短 SHA
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ -n "${{ github.event.inputs.version }}" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="dev-${GITHUB_SHA:0:7}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      - name: Build with PyInstaller
+        shell: cmd
+        env:
+          MP_DIR: ${{ steps.mediapipe.outputs.dir }}
+        run: |
+          pyinstaller ^
+            --name CropTool ^
+            --onefile ^
+            --noconsole ^
+            --clean ^
+            --add-data "%MP_DIR%\modules;mediapipe\modules" ^
+            --hidden-import mediapipe ^
+            --hidden-import cv2 ^
+            --collect-all mediapipe ^
+            main.py
+
+      - name: Verify artifact exists
+        shell: bash
+        run: |
+          ls -la dist/
+          test -f dist/CropTool.exe
+
+      - name: Package release zip
+        shell: bash
+        run: |
+          cd dist
+          PKG="CropTool-${{ steps.ver.outputs.version }}"
+          mkdir -p "$PKG"
+          cp CropTool.exe "$PKG/"
+          cp ../README.md "$PKG/"
+          cp ../requirements.txt "$PKG/"
+          7z a -tzip "${PKG}-win-x64.zip" "$PKG"
+          ls -la
+
+      - name: Upload artifact (all runs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: CropTool-${{ steps.ver.outputs.version }}-win-x64
+          path: |
+            dist/CropTool.exe
+            dist/CropTool-${{ steps.ver.outputs.version }}-win-x64.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.version != '')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.version }}
+          name: ${{ steps.ver.outputs.version }}
+          generate_release_notes: true
+          body: |
+            女装电商图片批量智能裁切工具 — Windows 版。
+
+            ## 下载
+            - `CropTool.exe` — 单文件可执行程序，双击即可运行
+            - `CropTool-${{ steps.ver.outputs.version }}-win-x64.zip` — 含 exe + README + requirements 的完整包
+
+            ## 使用
+            1. 下载 `CropTool.exe`
+            2. 双击启动（首次启动会加载 MediaPipe 模型，约 2~3 秒）
+            3. 选择输入 / 输出文件夹，点击 **开始处理**
+
+            详细文档见 [README.md](https://github.com/${{ github.repository }}/blob/main/README.md)。
+          files: |
+            dist/CropTool.exe
+            dist/CropTool-${{ steps.ver.outputs.version }}-win-x64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
